@@ -1,0 +1,47 @@
+name: VoiceRoom
+options:
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: ru
+packages:
+  LiveKit:
+    url: https://github.com/livekit/client-sdk-swift
+    exactVersion: 2.19.0
+targets:
+  VoiceRoom:
+    type: application
+    platform: iOS
+    sources:
+      - VoiceRoom
+    dependencies:
+      - package: LiveKit
+    info:
+      path: VoiceRoom/Info.plist
+      properties:
+        CFBundleDisplayName: VoiceRoom
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSMicrophoneUsageDescription: Микрофон нужен, чтобы тебя слышали в голосовом чате.
+        NSLocalNetworkUsageDescription: Нужно, чтобы подключаться к серверу VoiceRoom в домашней сети.
+        # Голос продолжает работать, когда переключаешься в игру.
+        UIBackgroundModes: [audio]
+        # Прототип ходит на сервер в домашней сети по http.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.voiceroom.app6c7825
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        # Идентификатор команды в git не хранится: он лежит в ios/team.local,
+        # install-iphone.sh передаёт его в xcodebuild.
+        DEVELOPMENT_TEAM: ""
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

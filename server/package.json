@@ -1,0 +1,14 @@
+{
+  "name": "voiceroom-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ники, комнаты и токены для голосового чата VoiceRoom",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@livekit/rtc-node": "^1.2.1",
+    "livekit-server-sdk": "2.19.3"
+  }
+}

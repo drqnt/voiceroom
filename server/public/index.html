@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoiceRoom</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<style>
+  :root {
+    --bg: #f5f5f7; --card: #ffffff; --text: #1d1d1f; --muted: #6e6e73;
+    --accent: #0a84ff; --danger: #ff3b30; --speaking: #30d158; --line: #e5e5ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #000; --card: #1c1c1e; --text: #f5f5f7; --muted: #98989d; --line: #38383a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 440px; margin: 0 auto; padding: 32px 16px; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .card { background: var(--card); border-radius: 14px; padding: 16px; margin-top: 16px; }
+  .row { display: flex; gap: 8px; }
+  input { flex: 1; min-width: 0; font: inherit; padding: 10px 12px; border-radius: 10px;
+          border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  button { font: inherit; font-weight: 600; padding: 10px 16px; border: 0; border-radius: 10px;
+           background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.danger { background: var(--danger); }
+  button.plain { background: var(--line); color: var(--text); }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+  li + li { border-top: 1px solid var(--line); }
+  .avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+            font-weight: 700; background: color-mix(in srgb, var(--accent) 20%, transparent);
+            box-shadow: 0 0 0 0 var(--speaking); transition: box-shadow .15s; }
+  .speaking .avatar { box-shadow: 0 0 0 3px var(--speaking); }
+  .room { cursor: pointer; }
+  .room .info { flex: 1; min-width: 0; }
+  .room .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .icon { background: none; color: var(--muted); padding: 6px; font-size: 16px; }
+  .icon:hover { color: var(--text); }
+  .title-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .title-row h2 { margin: 0; flex: 1; }
+  .video { aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: #000; margin-top: 8px; }
+  .video iframe, #ytPlayer { width: 100%; height: 100%; display: block; }
+  .error { color: var(--danger); font-size: 14px; margin-top: 8px; min-height: 1em; }
+  [hidden] { display: none !important; }
+  input[type=range] { padding: 0; border: 0; background: none; accent-color: var(--accent); }
+  .vol { width: 110px; flex: none; }
+  .pct { width: 44px; text-align: right; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<main>
+  <h1>VoiceRoom</h1>
+  <div class="muted">Голосовой чат с Мака, в тех же комнатах, что и на айфоне.</div>
+
+  <section id="nickView" class="card" hidden>
+    <div class="row">
+      <input id="nickInput" placeholder="Ник" autocomplete="off">
+      <button id="nickBtn">Продолжить</button>
+    </div>
+    <div id="nickError" class="error"></div>
+  </section>
+
+  <section id="lobbyView" hidden>
+    <div class="card">
+      <div class="muted" id="hello"></div>
+      <button id="createBtn" style="margin-top:8px;width:100%">＋ Создать комнату</button>
+      <div id="joinError" class="error"></div>
+    </div>
+    <div class="card">
+      <div class="muted">Комнаты</div>
+      <ul id="rooms"></ul>
+    </div>
+  </section>
+
+  <section id="roomView" hidden>
+    <div class="card">
+      <div class="title-row">
+        <h2 id="roomTitle"></h2>
+        <button id="renameBtn" class="icon" title="Переименовать комнату">✏️</button>
+      </div>
+      <ul id="members"></ul>
+      <div class="muted" id="volumeHint" style="margin-top:8px">Ползунок у человека меняет его громкость только у тебя. У себя — громкость твоего микрофона.</div>
+      <div class="row" style="margin-top:16px">
+        <button id="micBtn" class="plain">Выключить микрофон</button>
+        <button id="leaveBtn" class="danger">Выйти</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="muted">Видео и музыка</div>
+      <div id="videoBox" class="video" hidden><div id="ytPlayer"></div></div>
+      <div class="row" style="align-items:center;margin:8px 0">
+        <div id="musicNow" style="flex:1;min-width:0">Сейчас ничего не играет</div>
+        <button id="musicPause" class="plain" title="Пауза у всех" hidden>⏸</button>
+        <button id="musicSkip" class="plain" title="Следующее видео" hidden>⏭</button>
+        <button id="musicStop" class="plain" title="Остановить у всех" hidden>⏹</button>
+        <button id="musicMix" class="plain" title="Микс по этому треку: дальше похожие треки добавляются сами" hidden>📻</button>
+      </div>
+      <ol id="musicQueue" class="muted" style="margin:0 0 8px;padding-left:20px"></ol>
+      <div class="row">
+        <input id="musicInput" placeholder="Ссылка YouTube или название" autocomplete="off">
+        <button id="musicAdd">Включить</button>
+      </div>
+      <div class="row" id="volumeRow" style="margin-top:8px;align-items:center">
+        <span class="muted">🔈</span>
+        <input id="musicVolume" type="range" min="0" max="1" step="0.05" value="0.5" style="padding:0">
+        <span class="muted">🔊</span>
+      </div>
+      <div id="musicError" class="error"></div>
+      <div class="muted" style="margin-top:8px">Видео играет у всех в комнате с одного места, пауза и очередь общие. Ползунок меняет громкость только у тебя.</div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.23.0/dist/livekit-client.umd.js"></script>
+<script>
+  const { Room, RoomEvent, Track } = LivekitClient;
+  const BOT = 'music-bot';
+  // На айфоне Safari останавливает Web Audio, как только уходит в фон, и вместе с ним
+  // пропадают голоса, музыка и микрофон. Поэтому там звук идёт напрямую, без Web Audio,
+  // а ползунков громкости нет (iOS не даёт странице менять громкость без Web Audio).
+  const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  // Пробный режим для айфона (ссылка с ?webaudio): Web Audio + пометка страницы как звонка.
+  // Если Safari при этом не глушит звук в фоне, работают и фон, и ползунки.
+  const IOS_WEBAUDIO_TRIAL = IS_IOS && new URLSearchParams(location.search).has('webaudio');
+  const DIRECT_AUDIO = IS_IOS && !IOS_WEBAUDIO_TRIAL;
+  if (IOS_WEBAUDIO_TRIAL && navigator.audioSession) {
+    try { navigator.audioSession.type = 'play-and-record'; } catch {}
+  }
+  const $ = (id) => document.getElementById(id);
+
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} },
+  };
+  let deviceId = store.get('deviceId');
+  if (!deviceId) { deviceId = crypto.randomUUID(); store.set('deviceId', deviceId); }
+  let nick = store.get('nick');
+  let room = null;
+  let currentRoom = null;
+
+  async function api(method, path, body) {
+    const res = await fetch(path, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'X-Device-Id': deviceId },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { const e = new Error(data.message || `Ошибка ${res.status}`); e.code = data.error; throw e; }
+    return data;
+  }
+
+  function show(view) {
+    for (const v of ['nickView', 'lobbyView', 'roomView']) $(v).hidden = v !== view;
+  }
+
+  // ---- ник ----
+  $('nickBtn').onclick = async () => {
+    $('nickError').textContent = '';
+    try {
+      nick = (await api('POST', '/api/register', { nick: $('nickInput').value.trim(), deviceId })).nick;
+      store.set('nick', nick);
+      enterLobby();
+    } catch (e) { $('nickError').textContent = e.message; }
+  };
+  $('nickInput').onkeydown = (e) => { if (e.key === 'Enter') $('nickBtn').click(); };
+
+  // ---- лобби: список комнат, как каналы в Discord ----
+  let roomsTimer = null;
+  function enterLobby() {
+    show('lobbyView');
+    $('hello').textContent = `Ты: ${nick}`;
+    loadRooms();
+    clearInterval(roomsTimer);
+    roomsTimer = setInterval(loadRooms, 5000);
+  }
+
+  const showError = (e) => ($('joinError').textContent = e.message);
+
+  async function renameRoom(id, currentName) {
+    const name = prompt('Новое название комнаты', currentName)?.trim();
+    if (!name || name === currentName) return null;
+    const room = await api('PATCH', `/api/rooms/${encodeURIComponent(id)}`, { name });
+    return room.name;
+  }
+
+  async function loadRooms() {
+    try {
+      const { rooms } = await api('GET', '/api/rooms');
+      const list = $('rooms');
+      list.replaceChildren();
+      for (const r of rooms) {
+        const li = document.createElement('li');
+        li.className = 'room';
+        const icon = document.createElement('div');
+        icon.textContent = r.participants.length ? '🔊' : '🔈';
+        const info = document.createElement('div'); info.className = 'info';
+        const name = document.createElement('div'); name.textContent = r.name; name.style.fontWeight = '600';
+        const who = document.createElement('div'); who.className = 'muted who';
+        who.textContent = r.participants.length ? r.participants.join(', ') : 'Пусто';
+        info.append(name, who);
+        const rename = document.createElement('button'); rename.className = 'icon'; rename.textContent = '✏️';
+        rename.title = 'Переименовать';
+        rename.onclick = (e) => { e.stopPropagation(); renameRoom(r.id, r.name).then(loadRooms).catch(showError); };
+        li.append(icon, info, rename);
+        if (!r.participants.length) {
+          const del = document.createElement('button'); del.className = 'icon'; del.textContent = '🗑';
+          del.title = 'Удалить пустую комнату';
+          del.onclick = (e) => {
+            e.stopPropagation();
+            if (confirm(`Удалить комнату «${r.name}»?`)) api('DELETE', `/api/rooms/${encodeURIComponent(r.id)}`).then(loadRooms).catch(showError);
+          };
+          li.append(del);
+        }
+        li.onclick = () => join(r.id);
+        list.append(li);
+      }
+    } catch (e) {
+      if (e.code === 'unknown_device') { nick = null; store.set('nick', null); show('nickView'); }
+    }
+  }
+
+  // Сразу создаёт «Комната <ник>» и заходит; переименовать можно потом.
+  $('createBtn').onclick = async () => {
+    $('createBtn').disabled = true;
+    $('joinError').textContent = '';
+    try {
+      const room = await api('POST', '/api/rooms', {});
+      await join(room.id);
+    } catch (e) {
+      showError(e);
+    } finally {
+      $('createBtn').disabled = false;
+    }
+  };
+
+  // ---- комната ----
+  async function join(roomId) {
+    if (!roomId) return;
+    $('joinError').textContent = '';
+    try {
+      const grant = await api('POST', '/api/token', { room: roomId });
+      // webAudioMix нужен для громкости и усиления микрофона; на айфоне он ломает фон.
+      room = new Room({
+        webAudioMix: !DIRECT_AUDIO,
+        audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      room
+        .on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
+          if (track.kind !== Track.Kind.Audio) return;
+          document.body.append(track.attach());
+          applyVolume(participant);
+        })
+        .on(RoomEvent.RoomMetadataChanged, (metadata) => {
+          // Комнату переименовали: сервер кладёт название в метаданные.
+          const meta = parseJson(metadata, {});
+          if (meta.name) $('roomTitle').textContent = meta.name;
+          applyShared(meta.player);
+        })
+        .on(RoomEvent.DataReceived, (payload, participant, kind, topic) => {
+          // Сервер сразу рассылает новое состояние плеера (метаданные приходят позже).
+          if (topic !== 'player') return;
+          const data = parseJson(new TextDecoder().decode(payload), {});
+          applyShared(data.player);
+        })
+        .on(RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((el) => el.remove()))
+        .on(RoomEvent.ParticipantConnected, (p) => { applyVolume(p); renderMembers(); })
+        .on(RoomEvent.ParticipantDisconnected, () => { renderMembers(); })
+        .on(RoomEvent.ActiveSpeakersChanged, renderMembers)
+        .on(RoomEvent.TrackMuted, renderMembers)
+        .on(RoomEvent.TrackUnmuted, renderMembers)
+        .on(RoomEvent.Disconnected, () => { room = null; rows.clear(); $('members').replaceChildren(); stopShared(); enterLobby(); });
+      await room.connect(grant.url, grant.token);
+      await room.startAudio();
+      await room.localParticipant.setMicrophoneEnabled(true);
+      await attachMicGain();
+      room.remoteParticipants.forEach(applyVolume);
+      clearInterval(roomsTimer);
+      currentRoom = grant.room;
+      $('roomTitle').textContent = grant.name || grant.room;
+      show('roomView');
+      updateMicButton();
+      renderMembers();
+      await startShared();
+    } catch (e) {
+      $('joinError').textContent = e.name === 'NotAllowedError'
+        ? 'Нет доступа к микрофону. Разреши его в настройках браузера для этой страницы.'
+        : e.message;
+      if (room) { await room.disconnect(); room = null; }
+    }
+  }
+
+  // ---- громкость людей и своего микрофона ----
+  const savedVolumes = () => { try { return JSON.parse(store.get('volumes') || '{}'); } catch { return {}; } };
+  const volumeOf = (identity) => savedVolumes()[identity] ?? 1;
+  const micGainValue = () => Number(store.get('micGain') ?? 1);
+
+  function applyVolume(p) {
+    if (!p || p === room?.localParticipant) return;
+    if (p.identity !== BOT) p.setVolume(volumeOf(p.identity), Track.Source.Microphone);
+  }
+
+  // Усиление своего микрофона через Web Audio (GainNode) перед отправкой.
+  let micGainNode = null;
+  async function attachMicGain() {
+    micGainNode = null;
+    if (DIRECT_AUDIO) return;
+    const track = room?.localParticipant.getTrackPublication(Track.Source.Microphone)?.track;
+    if (!track) return;
+    const processor = {
+      name: 'mic-gain',
+      async init({ track: input, audioContext }) {
+        this.source = audioContext.createMediaStreamSource(new MediaStream([input]));
+        this.gain = audioContext.createGain();
+        this.gain.gain.value = micGainValue();
+        this.destination = audioContext.createMediaStreamDestination();
+        this.source.connect(this.gain).connect(this.destination);
+        this.processedTrack = this.destination.stream.getAudioTracks()[0];
+        micGainNode = this.gain;
+      },
+      async restart(opts) { await this.destroy(); await this.init(opts); },
+      async destroy() { this.source?.disconnect(); this.gain?.disconnect(); micGainNode = null; },
+    };
+    try {
+      await track.setProcessor(processor);
+    } catch (e) {
+      console.warn('Громкость микрофона недоступна:', e);
+    }
+  }
+
+  const rows = new Map();
+  function memberRow(p) {
+    let row = rows.get(p.identity);
+    if (row) return row;
+    const li = document.createElement('li');
+    const avatar = document.createElement('div'); avatar.className = 'avatar';
+    avatar.textContent = (p.identity[0] || '?').toUpperCase();
+    const name = document.createElement('div'); name.style.flex = '1';
+    const muted = document.createElement('div'); muted.textContent = '🔇';
+    const slider = document.createElement('input');
+    slider.type = 'range'; slider.min = '0'; slider.max = '2'; slider.step = '0.05'; slider.className = 'vol';
+    const pct = document.createElement('div'); pct.className = 'pct';
+    const isLocal = p === room.localParticipant;
+    slider.title = isLocal ? 'Громкость моего микрофона' : `Громкость ${p.identity} у меня`;
+    slider.value = String(isLocal ? micGainValue() : volumeOf(p.identity));
+    pct.textContent = `${Math.round(slider.value * 100)}%`;
+    slider.oninput = () => {
+      const v = Number(slider.value);
+      pct.textContent = `${Math.round(v * 100)}%`;
+      if (isLocal) {
+        store.set('micGain', String(v));
+        if (micGainNode) micGainNode.gain.value = v;
+      } else {
+        const all = savedVolumes();
+        if (v === 1) delete all[p.identity]; else all[p.identity] = v;
+        store.set('volumes', JSON.stringify(all));
+        room?.remoteParticipants.get(p.identity)?.setVolume(v, Track.Source.Microphone);
+      }
+    };
+    if (DIRECT_AUDIO) li.append(avatar, name, muted);
+    else li.append(avatar, name, muted, slider, pct);
+    row = { li, name, muted };
+    rows.set(p.identity, row);
+    return row;
+  }
+
+  function renderMembers() {
+    if (!room) return;
+    const people = [room.localParticipant, ...room.remoteParticipants.values()].filter((p) => p.identity !== BOT);
+    const list = $('members');
+    const present = new Set(people.map((p) => p.identity));
+    for (const [id, row] of rows) if (!present.has(id)) { row.li.remove(); rows.delete(id); }
+    for (const p of people) {
+      const row = memberRow(p);
+      row.li.className = p.isSpeaking ? 'speaking' : '';
+      row.name.textContent = p === room.localParticipant ? `${p.identity} (ты)` : p.identity;
+      row.muted.hidden = p.isMicrophoneEnabled;
+      list.append(row.li); // порядок как в people; существующий элемент просто переезжает
+    }
+  }
+
+  // ---- общий плеер YouTube (как в приложении) ----
+  // Видео играет у каждого в своём плеере; что играет и с какого места — общее:
+  // сервер хранит { videoId, title, by, startedAt, pausedAt } в метаданных комнаты.
+  const parseJson = (text, fallback) => { try { return text ? JSON.parse(text) : fallback; } catch { return fallback; } };
+  const musicVolume = () => Number($('musicVolume').value);
+  $('musicVolume').value = store.get('musicVolume') ?? '0.5';
+
+  let shared = { version: -1, current: null, queue: [] };
+  let yt = null;
+  let ytLoaded = null;
+  let clockOffset = 0;
+  let lastSeek = 0;
+  let reportedEnded = null;
+  let syncTimer = null;
+  let ourCommandsUntil = 0; // до этого момента изменения в плеере — от наших команд
+  const ours = () => (ourCommandsUntil = Date.now() + 2500);
+
+  const showMusicError = (e) => ($('musicError').textContent = e?.message ?? String(e ?? ''));
+
+  function loadYouTubeApi() {
+    return new Promise((resolve) => {
+      if (window.YT?.Player) return resolve();
+      const previous = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => { previous?.(); resolve(); };
+      if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+        const script = document.createElement('script');
+        script.src = 'https://www.youtube.com/iframe_api';
+        document.head.append(script);
+      }
+    });
+  }
+
+  async function ensurePlayer() {
+    if (yt) return yt;
+    await loadYouTubeApi();
+    await new Promise((resolve) => {
+      yt = new YT.Player('ytPlayer', {
+        width: '100%', height: '100%',
+        playerVars: { playsinline: 1, rel: 0, modestbranding: 1 },
+        events: {
+          onReady: () => { yt.setVolume(musicVolume() * 100); resolve(); },
+          onStateChange: (e) => {
+            const cur = shared.current;
+            const id = cur?.videoId;
+            if (e.data === YT.PlayerState.ENDED && id && reportedEnded !== id) {
+              reportedEnded = id;
+              playerCommand('ended', { videoId: id }).catch(() => {});
+            }
+            // Пауза или запуск кнопками самого плеера (не нашими командами) — для всех.
+            if (!cur || Date.now() < ourCommandsUntil || document.hidden) return;
+            if (e.data === YT.PlayerState.PAUSED && cur.pausedAt == null) {
+              playerCommand('pause', { position: yt.getCurrentTime() }).catch(showMusicError);
+            } else if (e.data === YT.PlayerState.PLAYING && cur.pausedAt != null) {
+              playerCommand('resume').catch(showMusicError);
+            }
+          },
+          onError: (e) => {
+            const cur = shared.current;
+            if ([100, 101, 150].includes(e.data) && cur) {
+              // Ролик нельзя включить — пропускаем у всех.
+              showMusicError(`Пропустил «${cur.title}»: автор запретил включать его в приложениях`);
+              playerCommand('unplayable', { videoId: cur.videoId }).catch(() => {});
+            } else {
+              showMusicError(`YouTube не смог включить видео (ошибка ${e.data})`);
+            }
+          },
+        },
+      });
+    });
+    return yt;
+  }
+
+  function expectedPosition() {
+    const cur = shared.current;
+    if (!cur) return 0;
+    if (cur.pausedAt != null) return cur.pausedAt;
+    return Math.max(0, (Date.now() + clockOffset - cur.startedAt) / 1000);
+  }
+
+  function renderShared() {
+    const cur = shared.current;
+    $('musicNow').textContent = cur
+      ? `${cur.pausedAt != null ? '⏸' : '▶️'} ${cur.title}${cur.by ? ` — включил ${cur.by}` : ''}`
+      : 'Сейчас ничего не играет';
+    for (const id of ['musicPause', 'musicSkip', 'musicStop', 'musicMix']) $(id).hidden = !cur;
+    $('musicPause').textContent = cur?.pausedAt != null ? '▶️' : '⏸';
+    // 📻 — радио: подсвечено, когда включено (нажать — выключить).
+    $('musicMix').style.opacity = shared.radio ? '1' : '0.45';
+    $('musicMix').title = shared.radio
+      ? 'Радио включено: похожие треки добавляются сами. Нажми, чтобы выключить'
+      : 'Микс по этому треку: дальше похожие треки добавляются сами';
+    $('videoBox').hidden = !cur;
+    const queue = $('musicQueue');
+    queue.replaceChildren();
+    for (const video of shared.queue.slice(0, 5)) {
+      const li = document.createElement('li'); li.textContent = video.title; queue.append(li);
+    }
+    const total = shared.queueLength ?? shared.queue.length;
+    if (total > 5) {
+      const li = document.createElement('li'); li.textContent = `и ещё ${total - 5}`; li.style.listStyle = 'none'; queue.append(li);
+    }
+  }
+
+  function applyShared(state) {
+    if (!state || (state.version ?? 0) < shared.version) return;
+    shared = {
+      version: state.version ?? 0, current: state.current ?? null, queue: state.queue ?? [],
+      queueLength: state.queueLength, radio: Boolean(state.radio),
+    };
+    renderShared();
+    follow().catch(showMusicError);
+  }
+
+  async function follow() {
+    const cur = shared.current;
+    if (!cur) {
+      if (yt?.pauseVideo) yt.pauseVideo();
+      ytLoaded = null;
+      return;
+    }
+    const player = await ensurePlayer();
+    if (ytLoaded !== cur.videoId) {
+      ytLoaded = cur.videoId;
+      reportedEnded = null;
+      ours();
+      player.loadVideoById({ videoId: cur.videoId, startSeconds: expectedPosition() });
+      if (cur.pausedAt != null) setTimeout(() => player.pauseVideo(), 500);
+    } else {
+      reconcile(false);
+    }
+  }
+
+  // Сверяем свой плеер с общим: пауза/игра и позиция (догоняем, если разошлись > 2 с).
+  let scheduledPlay = null;
+  function reconcile(periodic) {
+    const cur = shared.current;
+    if (!yt?.getPlayerState || !cur || ytLoaded !== cur.videoId) return;
+    const state = yt.getPlayerState();
+    const time = yt.getCurrentTime();
+    const expected = expectedPosition();
+    if (cur.pausedAt != null) {
+      if (state !== YT.PlayerState.PAUSED) { ours(); yt.pauseVideo(); }
+      if (Math.abs(time - expected) > 0.5) yt.seekTo(expected, true);
+      return;
+    }
+    if (state === YT.PlayerState.PAUSED && expected < time - 0.05) {
+      // Продолжение после паузы: сервер назначил момент чуть впереди, чтобы все начали разом.
+      clearTimeout(scheduledPlay);
+      scheduledPlay = setTimeout(() => {
+        if (shared.current?.pausedAt == null) { ours(); yt.playVideo(); }
+      }, Math.min(3000, (time - expected) * 1000));
+      return;
+    }
+    if ([YT.PlayerState.PAUSED, YT.PlayerState.CUED, -1].includes(state)) { ours(); yt.playVideo(); }
+    if (state !== YT.PlayerState.PLAYING || Math.abs(time - expected) <= 1) return;
+    if (periodic && Date.now() - lastSeek < 8000) return;
+    lastSeek = Date.now();
+    ours();
+    yt.seekTo(expected, true);
+  }
+
+  async function playerCommand(action, extra = {}) {
+    const reply = await api('POST', '/api/player', { room: currentRoom, action, ...extra });
+    applyShared(reply.player);
+    return reply;
+  }
+
+  async function startShared() {
+    try {
+      const sent = Date.now();
+      const { now } = await api('GET', '/api/time');
+      clockOffset = now + (Date.now() - sent) / 2 - Date.now();
+    } catch {}
+    applyShared(parseJson(room?.metadata, {}).player);
+    clearInterval(syncTimer);
+    syncTimer = setInterval(() => reconcile(true), 3000);
+  }
+
+  function stopShared() {
+    clearInterval(syncTimer);
+    try { yt?.destroy(); } catch {}
+    yt = null;
+    ytLoaded = null;
+    shared = { version: -1, current: null, queue: [] };
+    $('videoBox').innerHTML = '<div id="ytPlayer"></div>';
+    renderShared();
+  }
+
+  $('musicMix').onclick = () =>
+    playerCommand(shared.radio ? 'radio' : 'mix', { on: false }).catch(showMusicError);
+  $('musicAdd').onclick = async () => {
+    const q = $('musicInput').value.trim();
+    if (!q) return;
+    // Ссылка на плейлист или микс: весь или только ролик.
+    const whole = /[?&]list=/.test(q) && confirm(/list=RD/.test(q)
+      ? 'Это микс YouTube. Добавить весь микс? (Отмена — только этот ролик)'
+      : 'Это плейлист YouTube. Добавить весь плейлист? (Отмена — только этот ролик)');
+    $('musicAdd').disabled = true;
+    showMusicError('');
+    try {
+      await playerCommand(whole ? 'playlist' : 'add', { input: q });
+      $('musicInput').value = '';
+    } catch (e) {
+      showMusicError(e);
+    } finally {
+      $('musicAdd').disabled = false;
+    }
+  };
+  $('musicInput').onkeydown = (e) => { if (e.key === 'Enter') $('musicAdd').click(); };
+  $('musicPause').onclick = async () => {
+    try {
+      if (shared.current?.pausedAt != null) return await playerCommand('resume');
+      const position = yt?.getCurrentTime ? yt.getCurrentTime() : expectedPosition();
+      if (yt?.pauseVideo) { ours(); yt.pauseVideo(); } // у себя — сразу
+      await playerCommand('pause', { position });
+    } catch (e) { showMusicError(e); }
+  };
+  $('musicSkip').onclick = () => playerCommand('skip').catch(showMusicError);
+  $('musicStop').onclick = () => playerCommand('stop').catch(showMusicError);
+  $('musicVolume').oninput = () => {
+    store.set('musicVolume', $('musicVolume').value);
+    if (yt?.setVolume) yt.setVolume(musicVolume() * 100);
+  };
+
+  function updateMicButton() {
+    const on = room?.localParticipant.isMicrophoneEnabled;
+    $('micBtn').textContent = on ? 'Выключить микрофон' : 'Включить микрофон';
+  }
+
+  $('micBtn').onclick = async () => {
+    if (!room) return;
+    await room.localParticipant.setMicrophoneEnabled(!room.localParticipant.isMicrophoneEnabled);
+    updateMicButton();
+    renderMembers();
+  };
+
+  $('leaveBtn').onclick = async () => { if (room) await room.disconnect(); };
+  $('renameBtn').onclick = async () => {
+    try {
+      const name = await renameRoom(currentRoom, $('roomTitle').textContent);
+      if (name) $('roomTitle').textContent = name;
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  // На айфоне по http браузер не даёт микрофон: подсказываем поставить приложение.
+  // Вернулись из фона: будим звук, если Safari его приостановил.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && room) room.startAudio().catch(() => {});
+  });
+
+  if (IOS_WEBAUDIO_TRIAL) {
+    $('volumeHint').textContent = 'Пробный режим: ползунки работают. Проверь, не пропадает ли звук, когда сворачиваешь Safari.';
+  }
+  if (DIRECT_AUDIO) {
+    $('volumeHint').textContent = 'В браузере на айфоне громкость меняется только кнопками телефона. Громкость отдельно по людям и музыке есть в приложении VoiceRoom.';
+    $('volumeRow').hidden = true; // iOS не даёт странице менять громкость видео
+  }
+
+  if (!window.isSecureContext) {
+    document.querySelector('main').innerHTML =
+      '<h1>VoiceRoom</h1><div class="card">Эта страница работает только на самом Маке: ' +
+      'открой на нём <b>http://localhost:3000</b>. На айфоне пользуйся приложением VoiceRoom.</div>';
+  } else if (nick) enterLobby(); else show('nickView');
+</script>
+</body>
+</html>

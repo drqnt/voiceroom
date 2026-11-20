@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>VoiceRoom плеер</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  #player { position: absolute; inset: 0; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<!--
+  Встроенный плеер YouTube для приложения VoiceRoom.
+  Открывается внутри приложения (WKWebView) с этого адреса: YouTube требует,
+  чтобы встроенный плеер жил на настоящем сайте. Приложение управляет им через
+  window.vr.*, а плеер сообщает о себе через messageHandlers.player.
+-->
+<div id="player"></div>
+<script>
+  const send = (msg) => {
+    try { window.webkit.messageHandlers.player.postMessage(msg); } catch { console.log(msg); }
+  };
+
+  // ?mode=video — плеер только для картинки: без звука (звук играет другой плеер).
+  const videoOnly = new URLSearchParams(location.search).get('mode') === 'video';
+  let player = null;
+  let wantPlaying = false;
+  let currentVolume = 1;
+  let nowPlaying = null;
+  // Название и обложка для острова и экрана блокировки (их ставит скрипт приложения внутри плеера).
+  const postNowPlaying = () => nowPlaying && player?.getIframe()?.contentWindow?.postMessage({ vrNowPlaying: nowPlaying }, '*');
+  let ready = false;
+  const pending = [];
+
+  window.onYouTubeIframeAPIReady = () => {
+    player = new YT.Player('player', {
+      width: '100%',
+      height: '100%',
+      // Плеер картинки — без кнопок YouTube: свои кнопки рисует приложение.
+      playerVars: { playsinline: 1, autoplay: 1, controls: videoOnly ? 0 : 1, rel: 0, modestbranding: 1,
+                    fs: videoOnly ? 0 : 1, mute: videoOnly ? 1 : 0, iv_load_policy: 3, disablekb: 1 },
+      events: {
+        onReady: () => {
+          ready = true;
+          send({ event: 'ready' });
+          pending.splice(0).forEach((fn) => fn());
+        },
+        onStateChange: (e) => {
+          // Приложение само решает, что это: пауза пользователя или iOS при сворачивании.
+          send({ event: 'state', state: e.data, time: player.getCurrentTime() });
+          if (videoOnly && !player.isMuted()) player.mute();
+          player.getIframe()?.contentWindow?.postMessage({ vrVolume: currentVolume }, '*');
+          postNowPlaying();
+        },
+        onError: (e) => send({ event: 'error', code: e.data }),
+      },
+    });
+  };
+
+  const whenReady = (fn) => (ready ? fn() : pending.push(fn));
+
+  // Управление из приложения.
+  window.vr = {
+    load: (videoId, startSeconds = 0) => whenReady(() => { wantPlaying = true; player.loadVideoById({ videoId, startSeconds }); }),
+    play: () => whenReady(() => { wantPlaying = true; player.playVideo(); }),
+    pause: () => whenReady(() => { wantPlaying = false; player.pauseVideo(); }),
+    seek: (seconds) => whenReady(() => player.seekTo(seconds, true)),
+    mute: () => whenReady(() => player.mute()),
+    nowPlaying: (info) => whenReady(() => { nowPlaying = info; postNowPlaying(); }),
+    // Картинка в картинке (системная): включает скрипт приложения внутри плеера.
+    pip: (on) => whenReady(() => player.getIframe()?.contentWindow?.postMessage({ vrPip: on }, '*')),
+    // Чуть быстрее/медленнее, чтобы картинка догнала звук без перемотки.
+    setRate: (rate) => whenReady(() => player.getIframe()?.contentWindow?.postMessage({ vrRate: rate }, '*')),
+    // Громкость 0…1. На айфоне YouTube свою громкость менять не может, поэтому
+    // передаём её внутрь плеера, где приложение подставило свой регулятор.
+    setVolume: (volume) => whenReady(() => {
+      currentVolume = volume;
+      player.setVolume(Math.round(volume * 100));
+      player.getIframe()?.contentWindow?.postMessage({ vrVolume: volume }, '*');
+    }),
+    status: () => (player && ready ? {
+      state: player.getPlayerState(),
+      time: player.getCurrentTime(),
+      duration: player.getDuration(),
+      volume: player.getVolume(),
+      title: player.getVideoData?.().title ?? '',
+      hidden: document.hidden,
+    } : { state: 'not-ready', hidden: document.hidden }),
+  };
+
+  document.addEventListener('visibilitychange', () => send({ event: 'visibility', hidden: document.hidden }));
+
+  // Плеер звука держим «звучащим» и между треками, и на паузе: неслышный сигнал
+  // (-90 дБ, 20 Гц). Иначе, пока приложение свёрнуто (ты в игре), iOS усыпляет
+  // встроенный браузер, и трек, который включил друг, не начинается до возврата в приложение.
+  if (!videoOnly) {
+    const keepAlive = () => {
+      try {
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = 20;
+        gain.gain.value = 0.00003;
+        osc.connect(gain).connect(ctx.destination);
+        osc.start();
+        const wake = () => { if (ctx.state !== 'running' && ctx.state !== 'closed') ctx.resume().catch(() => {}); };
+        ctx.addEventListener('statechange', wake);
+        setInterval(wake, 3000);
+        send({ event: 'keepAlive', state: ctx.state });
+      } catch (e) {
+        send({ event: 'keepAlive', error: String(e) });
+      }
+    };
+    keepAlive();
+  }
+</script>
+<script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>

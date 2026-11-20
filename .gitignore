@@ -1,0 +1,10 @@
+server/data/
+dist/
+*.ipa
+.env
+server/.env
+server/tunnel.yml
+node_modules/
+xcuserdata/
+.DS_Store
+team.local
